@@ -1,0 +1,67 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { MongoClient } from 'mongodb';
+import path from 'path';
+import fs from 'fs';
+
+const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'green-kerala';
+
+let client: MongoClient | null = null;
+let galleryCollection: any = null;
+
+async function getCollection() {
+  if (!galleryCollection) {
+    if (!client) {
+      client = new MongoClient(MONGODB_URI!);
+      await client.connect();
+    }
+    const db = client.db(MONGODB_DB_NAME);
+    galleryCollection = db.collection('gallery');
+  }
+  return galleryCollection;
+}
+
+const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+fs.mkdirSync(uploadDir, { recursive: true });
+
+export async function POST(request: NextRequest) {
+  try {
+    const formData = await request.formData();
+    const file = formData.get('image') as File;
+
+    if (!file) {
+      return NextResponse.json({ error: 'Image file is required.' }, { status: 400 });
+    }
+
+    if (!file.type.startsWith('image/')) {
+      return NextResponse.json({ error: 'Only image files are allowed.' }, { status: 400 });
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return NextResponse.json({ error: 'File size too large.' }, { status: 400 });
+    }
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const sanitized = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    const filename = `${Date.now()}_${sanitized}`;
+    const filepath = path.join(uploadDir, filename);
+
+    fs.writeFileSync(filepath, buffer);
+
+    const imageUrl = `/uploads/${filename}`;
+
+    const collection = await getCollection();
+    const result = await collection.insertOne({
+      url: imageUrl,
+      storagePath: filename,
+      ownerId: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    return NextResponse.json({ id: result.insertedId.toString(), url: imageUrl }, { status: 201 });
+  } catch (error) {
+    console.error('Gallery upload error:', error);
+    return NextResponse.json({ error: 'Failed to upload image.' }, { status: 500 });
+  }
+}

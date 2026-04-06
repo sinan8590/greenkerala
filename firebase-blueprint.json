@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { MongoClient } from 'mongodb';
+
+const MONGODB_URI = process.env.MONGODB_URI;
+const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'green-kerala';
+
+let client: MongoClient | null = null;
+let settingsCollection: any = null;
+
+async function getCollection() {
+  if (!settingsCollection) {
+    if (!client) {
+      client = new MongoClient(MONGODB_URI!);
+      await client.connect();
+    }
+    const db = client.db(MONGODB_DB_NAME);
+    settingsCollection = db.collection('settings');
+  }
+  return settingsCollection;
+}
+
+export async function GET() {
+  try {
+    const collection = await getCollection();
+    const settings = await collection.findOne({ _id: 'app' });
+    if (!settings) {
+      const defaultSettings = {
+        _id: 'app',
+        phoneNumber: '9207479305',
+        instagramId: 'sinan_____U',
+        owners: [],
+        updatedAt: new Date(),
+      };
+      await collection.insertOne(defaultSettings);
+      const { _id, ...payload } = defaultSettings;
+      return NextResponse.json(payload);
+    }
+    const { _id, ...payload } = settings;
+    return NextResponse.json(payload);
+  } catch (error) {
+    console.error('Settings fetch error:', error);
+    return NextResponse.json({ error: 'Failed to fetch settings.' }, { status: 500 });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const { phoneNumber, instagramId, owners } = await request.json();
+    if (!phoneNumber || !instagramId || !Array.isArray(owners)) {
+      return NextResponse.json({ error: 'Invalid settings payload.' }, { status: 400 });
+    }
+
+    const collection = await getCollection();
+    await collection.updateOne(
+      { _id: 'app' },
+      {
+        $set: {
+          phoneNumber,
+          instagramId,
+          owners,
+          updatedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error('Settings update error:', error);
+    return NextResponse.json({ error: 'Failed to update settings.' }, { status: 500 });
+  }
+}
